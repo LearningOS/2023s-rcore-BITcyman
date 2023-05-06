@@ -4,7 +4,8 @@ use alloc::sync::Arc;
 use crate::{
     config::MAX_SYSCALL_NUM,
     loader::get_app_data_by_name,
-    mm::{translated_refmut, translated_str},
+    timer::get_time_us,
+    mm::{translated_refmut, translated_str, VirtAddr},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
         suspend_current_and_run_next, TaskStatus,
@@ -121,6 +122,15 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_get_time", current_task().unwrap().pid.0
     );
+    let us = get_time_us();
+    let pa: usize = translate(VirtAddr::from(_ts as usize)).into();
+    unsafe {
+        * (pa as *mut TimeVal) = TimeVal {
+            sec: us / 1_000_000,
+            usec: us % 1_000_000,
+        }
+    }
+    0
     
 }
 
