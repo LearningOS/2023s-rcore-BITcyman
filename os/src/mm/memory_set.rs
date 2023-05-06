@@ -70,6 +70,12 @@ impl MemorySet {
         }
         self.areas.push(map_area);
     }
+
+    pub fn includes(&self, vr: VPNRange) -> bool{
+        self.areas.iter().any(|area| area.includes(vr))
+    }
+
+
     /// Mention that trampoline is not collected by areas.
     fn map_trampoline(&mut self) {
         self.page_table.map(
@@ -221,6 +227,41 @@ impl MemorySet {
             elf.header.pt2.entry_point() as usize,
         )
     }
+    pub fn mmap(&mut self, start: usize, len: usize, port:usize) -> isize {
+        let perm = MapPermission::from_bits(((port<<1) +16) as u8).unwrap();
+        let start = VirtAddr(start);
+        let end = VirtAddr(start.0 + len);
+        let vr = VPNRange::new(start.floor(), end.ceil());
+        if self.includes(vr) {
+            return -1;
+        }
+        self.push(MapArea::new(start, end, MapType::Framed, perm), None);
+        0
+    }
+    
+    pub fn munmap(&mut self, start: usize, len: usize) -> isize {
+        let start = VirtAddr(start);
+        let end = VirtAddr(start.0 + len);
+        if !start.aligned() {
+            return -1;
+        }
+        let vr = VPNRange::new(start.floor(), end.ceil());
+        let pos = self.areas.iter().position(
+                |area| area.vpn_range.get_start() == vr.get_start() && area.vpn_range.get_end() == vr.get_end()
+            );
+
+        match pos {
+            Some(idx) => {
+                // println!("start:{}, len:{}\n areas[idx].start:{}, areas[idx].end:{}");
+                self.areas[idx].unmap(&mut self.page_table);
+                self.areas.remove(idx);
+                0
+            }
+            None => -1,
+        }
+    }
+    
+    
     /// Change page table by writing satp CSR Register.
     pub fn activate(&self) {
         let satp = self.page_table.token();
@@ -229,6 +270,8 @@ impl MemorySet {
             asm!("sfence.vma");
         }
     }
+
+
     /// Translate a virtual page number to a page table entry
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
         self.page_table.translate(vpn)
@@ -287,6 +330,11 @@ impl MapArea {
             map_perm,
         }
     }
+
+    pub fn includes(&self, vr: VPNRange) -> bool{
+        self.vpn_range.includes(vr)
+    }
+
     pub fn map_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
         let ppn: PhysPageNum;
         match self.map_type {

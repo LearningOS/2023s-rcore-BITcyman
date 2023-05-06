@@ -194,6 +194,18 @@ impl TaskManager {
         let st = current_task.syscall_times.entry(syscall_id).or_insert_with(||{0});
         *st += 1;
     }
+
+    fn current_mmap(&self, start: usize, len: usize, port: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let current_task = inner.current_task;
+        inner.tasks[current_task].memory_set.mmap(start, len, port)
+    }
+
+    fn current_munmap(&self, start: usize, len: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let current_task = inner.current_task;
+        inner.tasks[current_task].memory_set.munmap(start, len)
+    }
 }
 
 /// Run the first task in task list.
@@ -250,4 +262,12 @@ pub fn current_task_info(pa: usize) -> isize {
 
 pub fn increase_current_syscall(syscall_id: usize) {
     TASK_MANAGER.increase_syscall(syscall_id);
+}
+
+pub fn current_mmap(start: usize, len: usize, port: usize) -> isize {
+    TASK_MANAGER.current_mmap(start, len, port)
+}
+
+pub fn current_munmap(start: usize, len: usize) -> isize {
+    TASK_MANAGER.current_munmap(start, len)
 }
