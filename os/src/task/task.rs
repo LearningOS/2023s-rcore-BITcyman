@@ -1,5 +1,6 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
+use super::BIG_STRIDE;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::TRAP_CONTEXT_BASE;
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
@@ -8,6 +9,7 @@ use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::cell::RefMut;
+use core::cmp::Ordering;
 
 /// Task control block structure
 ///
@@ -68,6 +70,12 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// Stride for task management 
+    pub stride: usize,
+
+    /// Task priority
+    pub priority: usize,
 }
 
 impl TaskControlBlockInner {
@@ -85,6 +93,11 @@ impl TaskControlBlockInner {
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
     }
+
+    pub fn add_stride(&mut self) {
+        self.stride += BIG_STRIDE / self.priority;
+    }
+
 }
 
 impl TaskControlBlock {
@@ -118,6 +131,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    stride: 0,
+                    priority: 16,
                 })
             },
         };
@@ -150,8 +165,12 @@ impl TaskControlBlock {
         inner.trap_cx_ppn = trap_cx_ppn;
         // initialize base_size
         inner.base_size = user_sp;
+        // initialize stride and priority
+        inner.stride = 0;
+        inner.priority = 16;
         // initialize trap_cx
         let trap_cx = inner.get_trap_cx();
+
         *trap_cx = TrapContext::app_init_context(
             entry_point,
             user_sp,
@@ -191,6 +210,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    stride: parent_inner.stride,
+                    priority: parent_inner.priority,
                 })
             },
         });
@@ -234,6 +255,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    stride: 0,
+                    priority: 16,
                 })
             },
         });
@@ -298,4 +321,34 @@ pub enum TaskStatus {
     Running,
     /// exited
     Zombie,
+}
+
+impl PartialEq for TaskControlBlock {
+    fn eq(&self, other: &Self) -> bool {
+        let my_inner = self.inner_exclusive_access();
+        let other_inner = other.inner_exclusive_access();
+        my_inner.stride == other_inner.stride
+    }
+}
+
+impl PartialOrd for TaskControlBlock {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for TaskControlBlock {}
+
+impl Ord for TaskControlBlock {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Reverse order for min heap
+        let my_inner = self.inner_exclusive_access();
+        let other_inner = other.inner_exclusive_access();
+        // my_inner.stride.cmp(&other_inner.stride)
+        match my_inner.stride.cmp(&other_inner.stride) {
+            Ordering::Less => Ordering::Greater,
+            Ordering::Equal => Ordering::Equal,
+            Ordering::Greater => Ordering::Less,
+        }
+    }
 }

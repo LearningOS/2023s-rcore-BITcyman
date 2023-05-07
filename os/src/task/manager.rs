@@ -1,36 +1,72 @@
 //!Implementation of [`TaskManager`]
 use super::TaskControlBlock;
 use crate::sync::UPSafeCell;
-use alloc::collections::VecDeque;
+use alloc::collections::{VecDeque, BinaryHeap};
 use alloc::sync::Arc;
 use lazy_static::*;
 ///A array of `TaskControlBlock` that is thread-safe
-pub struct TaskManager {
+
+pub const BIG_STRIDE: usize = 0xffffffff;
+
+
+pub trait TaskManager {
+    fn new() -> Self;
+    fn add(&mut self, task:Arc<TaskControlBlock>);
+    fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> ;
+}
+
+pub struct FIFOTaskManager {
     ready_queue: VecDeque<Arc<TaskControlBlock>>,
 }
 
 /// A simple FIFO scheduler.
-impl TaskManager {
+impl TaskManager for FIFOTaskManager{
     ///Creat an empty TaskManager
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             ready_queue: VecDeque::new(),
         }
     }
     /// Add process back to ready queue
-    pub fn add(&mut self, task: Arc<TaskControlBlock>) {
+    fn add(&mut self, task: Arc<TaskControlBlock>) {
         self.ready_queue.push_back(task);
     }
     /// Take a process out of the ready queue
-    pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
+    fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
+        // let rq = ready_queue.clone();
         self.ready_queue.pop_front()
     }
 }
 
+pub struct StrideManager {
+    ready_queue: BinaryHeap<Arc<TaskControlBlock>>,
+} 
+
+impl TaskManager for StrideManager {
+    ///Creat an empty TaskManager
+    fn new() -> Self {
+        Self {
+            ready_queue: BinaryHeap::new(),
+        }
+    }
+    /// Add process back to ready queue
+    fn add(&mut self, task: Arc<TaskControlBlock>) {
+        self.ready_queue.push(task);
+    }
+    /// Take a process out of the ready queue
+    fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
+        // let rq = ready_queue.clone();
+        let next_tcb = self.ready_queue.pop();
+        next_tcb.clone().unwrap().inner_exclusive_access().add_stride();
+        next_tcb
+    }
+}
+
+
 lazy_static! {
     /// TASK_MANAGER instance through lazy_static!
-    pub static ref TASK_MANAGER: UPSafeCell<TaskManager> =
-        unsafe { UPSafeCell::new(TaskManager::new()) };
+    pub static ref TASK_MANAGER: UPSafeCell<StrideManager> =
+        unsafe { UPSafeCell::new(StrideManager::new()) };
 }
 
 /// Add process to ready queue
