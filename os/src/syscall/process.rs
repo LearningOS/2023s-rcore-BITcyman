@@ -5,10 +5,10 @@ use crate::{
     config::MAX_SYSCALL_NUM,
     loader::get_app_data_by_name,
     timer::get_time_us,
-    mm::{translated_refmut, translated_str, VirtAddr},
+    mm::{translated_refmut, translated_str, VirtAddr, PhysAddr, PageTable},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next, TaskStatus,
+        suspend_current_and_run_next, TaskStatus, current_mmap, current_munmap,
     },
 };
 
@@ -148,19 +148,24 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
 /// YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
+        "kernel:pid[{}] sys_mmap ", current_task().unwrap().pid.0
     );
-    -1
+    let va = VirtAddr(_start);
+    if !va.aligned() {
+        return -1
+    }
+    if (_port & 0x7) == 0 || _port > 7 {
+        return -1
+    }
+    current_mmap(_start, _len, _port)
 }
 
 /// YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
+        "kernel:pid[{}] sys_munmap", current_task().unwrap().pid.0
     );
-    -1
+    current_munmap(_start, _len)
 }
 
 /// change data segment size
@@ -203,3 +208,14 @@ pub fn sys_set_priority(_prio: isize) -> isize {
     );
     -1
 }
+
+
+pub fn translate(va: VirtAddr) -> PhysAddr {
+    let current_token = current_user_token();
+    let pt = PageTable::from_token(current_token);
+    let ppn = pt.translate(va.floor()).unwrap().ppn();
+    let pa: PhysAddr = ppn.into();
+    let pa: usize = pa.into();
+    PhysAddr ::from(pa + va.page_offset())  
+}
+
